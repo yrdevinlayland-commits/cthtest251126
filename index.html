@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>課後活動查詢系統</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -13,12 +15,36 @@
             colors: {
               primary: '#5D5CDE',
               'primary-hover': '#4a49c5',
+            },
+            animation: {
+                'fade-in': 'fadeIn 0.5s ease-out',
+                'fade-in-up': 'fadeInUp 0.5s ease-out',
+            },
+            keyframes: {
+                fadeIn: {
+                    '0%': { opacity: '0' },
+                    '100%': { opacity: '1' },
+                },
+                fadeInUp: {
+                    '0%': { opacity: '0', transform: 'translateY(10px)' },
+                    '100%': { opacity: '1', transform: 'translateY(0)' },
+                },
             }
           }
         }
       }
     </script>
-  <script type="importmap">
+
+    <!-- React & ReactDOM (UMD for browser) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for transpiling JSX in browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Load Data -->
+    <script src="constants.ts"></script>
+<script type="importmap">
 {
   "imports": {
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
@@ -28,7 +54,373 @@
 }
 </script>
 </head>
-  <body class="bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100 transition-colors duration-200">
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-gray-100 transition-colors duration-200 py-8 px-4">
     <div id="root"></div>
-  </body>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // --- Constants & Types ---
+        const DAYS_OF_WEEK = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+        const WORK_DAYS = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+        // --- Utils ---
+        const processRawData = (rawData) => {
+            const studentMap = {};
+
+            if (!rawData) return [];
+
+            rawData.forEach(parts => {
+                const [className, studentId, name, activityName, activityDays, time, teacher, location] = parts;
+                const key = `${className}_${studentId}`;
+
+                if (!studentMap[key]) {
+                    studentMap[key] = {
+                        className,
+                        studentId,
+                        name,
+                        activities: {}
+                    };
+                }
+
+                if (!activityDays) return;
+
+                const activityDetail = {
+                    name: activityName || '',
+                    time: time || '',
+                    teacher: teacher || '',
+                    location: location || ''
+                };
+
+                const days = (activityDays || '').split('＆').map(d => d.trim());
+
+                days.forEach(day => {
+                    if (DAYS_OF_WEEK.includes(day)) {
+                        if (!studentMap[key].activities[day]) {
+                            studentMap[key].activities[day] = [];
+                        }
+                        studentMap[key].activities[day].push(activityDetail);
+                    }
+                });
+            });
+
+            return Object.values(studentMap).sort((a, b) => {
+                const numA = parseInt(a.className.match(/\d+/)?.[0] || '0');
+                const numB = parseInt(b.className.match(/\d+/)?.[0] || '0');
+                if (numA !== numB) return numA - numB;
+
+                const charA = a.className.match(/[A-Z]/)?.[0] || '';
+                const charB = b.className.match(/[A-Z]/)?.[0] || '';
+                const classCompare = charA.localeCompare(charB);
+                if (classCompare !== 0) return classCompare;
+
+                return parseInt(a.studentId) - parseInt(b.studentId);
+            });
+        };
+
+        const getUniqueClasses = (students) => {
+            return Array.from(new Set(students.map(s => s.className))).sort((a, b) => {
+                const numA = parseInt(a.match(/\d+/)?.[0] || '0');
+                const numB = parseInt(b.match(/\d+/)?.[0] || '0');
+                if (numA !== numB) return numA - numB;
+                
+                const charA = a.match(/[A-Z]/)?.[0] || '';
+                const charB = b.match(/[A-Z]/)?.[0] || '';
+                return charA.localeCompare(charB);
+            });
+        };
+
+        const getFormattedDate = () => {
+            const today = new Date();
+            const dayName = DAYS_OF_WEEK[today.getDay()];
+            const dateString = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+            return { dateString, dayName };
+        };
+
+        const getDefaultDay = () => {
+            const todayIndex = new Date().getDay();
+            const dayName = DAYS_OF_WEEK[todayIndex];
+            if (todayIndex === 0) return '星期一';
+            return dayName;
+        };
+
+        // --- Components ---
+
+        const Header = () => (
+            <div className="text-center mb-8 animate-fade-in-up">
+                <h1 className="text-4xl font-bold text-gray-800 dark:text-white mb-2">
+                    課後活動查詢系統
+                </h1>
+                <p className="text-gray-600 dark:text-gray-400">
+                    請選擇班別、學號和星期查詢您的課後活動安排
+                </p>
+            </div>
+        );
+
+        const TodayInfo = () => {
+            const [info, setInfo] = useState({ dateString: '', dayName: '' });
+
+            useEffect(() => {
+                setInfo(getFormattedDate());
+            }, []);
+
+            return (
+                <div className="bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 dark:border-blue-400 p-4 mb-6 rounded shadow-sm animate-fade-in">
+                    <p className="text-blue-700 dark:text-blue-200 font-medium">
+                        今天是 {info.dateString} ({info.dayName})
+                    </p>
+                </div>
+            );
+        };
+
+        const SearchForm = ({ classes, selectedClass, onClassChange, studentsInClass, selectedStudentId, onStudentChange, selectedDay, onDayChange, onSearch }) => {
+            const isSearchDisabled = !selectedClass || !selectedStudentId;
+
+            return (
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 mb-6 border border-gray-100 dark:border-gray-700 animate-fade-in-up">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                選擇班別
+                            </label>
+                            <select
+                                value={selectedClass}
+                                onChange={(e) => onClassChange(e.target.value)}
+                                className="w-full px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-shadow"
+                            >
+                                <option value="">請選擇班別</option>
+                                {classes.map(cls => (
+                                    <option key={cls} value={cls}>{cls}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                選擇學號
+                            </label>
+                            <select
+                                value={selectedStudentId}
+                                onChange={(e) => onStudentChange(e.target.value)}
+                                disabled={!selectedClass}
+                                className="w-full px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-shadow"
+                            >
+                                <option value="">{selectedClass ? '請選擇學號' : '請先選擇班別'}</option>
+                                {studentsInClass.map(student => (
+                                    <option key={student.studentId} value={student.studentId}>
+                                        {student.studentId} - {student.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                選擇星期
+                            </label>
+                            <select
+                                value={selectedDay}
+                                onChange={(e) => onDayChange(e.target.value)}
+                                className="w-full px-4 py-2 text-base border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-shadow"
+                            >
+                                {WORK_DAYS.map(day => (
+                                    <option key={day} value={day}>{day}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex items-end">
+                            <button
+                                onClick={onSearch}
+                                disabled={isSearchDisabled}
+                                className={`w-full px-6 py-2 font-medium rounded-lg transition-all duration-200 
+                                    ${isSearchDisabled 
+                                        ? 'bg-gray-400 cursor-not-allowed opacity-50 text-gray-100' 
+                                        : 'bg-primary hover:bg-primary-hover text-white shadow-md hover:shadow-lg transform active:scale-95'
+                                    }`}
+                            >
+                                查詢活動
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const StudentInfo = ({ student, searchDay }) => (
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-4 border border-gray-100 dark:border-gray-700 animate-fade-in-up">
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 border-b pb-2 dark:border-gray-700">
+                    查詢學生資訊
+                </h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                        <p className="text-gray-600 dark:text-gray-400 mb-1">姓名</p>
+                        <p className="font-semibold text-gray-800 dark:text-white text-lg">{student.name}</p>
+                    </div>
+                    <div className="p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                        <p className="text-gray-600 dark:text-gray-400 mb-1">班別</p>
+                        <p className="font-semibold text-gray-800 dark:text-white text-lg">{student.className}</p>
+                    </div>
+                    <div className="p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                        <p className="text-gray-600 dark:text-gray-400 mb-1">學號</p>
+                        <p className="font-semibold text-gray-800 dark:text-white text-lg">{student.studentId}</p>
+                    </div>
+                    <div className="p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
+                        <p className="text-gray-600 dark:text-gray-400 mb-1">查詢日期</p>
+                        <p className="font-semibold text-blue-600 dark:text-blue-400 text-lg">{searchDay}</p>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const ActivityCard = ({ activity }) => (
+            <div className="group bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 dark:border-green-400 p-5 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 transform hover:-translate-y-1 animate-fade-in-up">
+                <p className="text-green-800 dark:text-green-100 font-bold text-lg mb-2">
+                    {activity.name}
+                </p>
+                <div className="text-sm text-green-700 dark:text-green-300 space-y-1 md:space-y-0 md:flex md:flex-wrap md:gap-x-4">
+                    <span className="flex items-center">
+                       <svg className="w-4 h-4 mr-1 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                       <strong>時間:</strong>&nbsp;{activity.time}
+                    </span>
+                    <span className="hidden md:inline text-green-400">|</span>
+                    <span className="flex items-center">
+                        <svg className="w-4 h-4 mr-1 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        <strong>老師:</strong>&nbsp;{activity.teacher}
+                    </span>
+                    <span className="hidden md:inline text-green-400">|</span>
+                    <span className="flex items-center">
+                        <svg className="w-4 h-4 mr-1 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        <strong>場地:</strong>&nbsp;{activity.location}
+                    </span>
+                </div>
+            </div>
+        );
+
+        const App = () => {
+            const [allStudents, setAllStudents] = useState([]);
+            
+            // Selection State
+            const [selectedClass, setSelectedClass] = useState('');
+            const [selectedStudentId, setSelectedStudentId] = useState('');
+            const [selectedDay, setSelectedDay] = useState(getDefaultDay());
+
+            // Search Result State
+            const [searchResult, setSearchResult] = useState({ 
+                student: null, 
+                hasSearched: false 
+            });
+
+            // Dark Mode
+            useEffect(() => {
+                const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (isDarkMode) document.documentElement.classList.add('dark');
+                
+                const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                const handler = (e) => {
+                    if (e.matches) document.documentElement.classList.add('dark');
+                    else document.documentElement.classList.remove('dark');
+                };
+                mediaQuery.addEventListener('change', handler);
+                return () => mediaQuery.removeEventListener('change', handler);
+            }, []);
+
+            // Load Data
+            useEffect(() => {
+                if (window.RAW_ACTIVITY_DATA) {
+                    const data = processRawData(window.RAW_ACTIVITY_DATA);
+                    setAllStudents(data);
+                } else {
+                    console.error("RAW_ACTIVITY_DATA not found. Make sure constants.js is loaded.");
+                }
+            }, []);
+
+            // Derived State
+            const classes = useMemo(() => getUniqueClasses(allStudents), [allStudents]);
+            
+            const studentsInClass = useMemo(() => {
+                if (!selectedClass) return [];
+                return allStudents.filter(s => s.className === selectedClass);
+            }, [allStudents, selectedClass]);
+
+            // Handlers
+            const handleClassChange = useCallback((cls) => {
+                setSelectedClass(cls);
+                setSelectedStudentId(''); 
+                setSearchResult({ student: null, hasSearched: false });
+            }, []);
+
+            const handleStudentChange = useCallback((id) => {
+                setSelectedStudentId(id);
+                setSearchResult({ student: null, hasSearched: false });
+            }, []);
+
+            const handleDayChange = useCallback((day) => {
+                setSelectedDay(day);
+                setSearchResult({ student: null, hasSearched: false });
+            }, []);
+
+            const handleSearch = useCallback(() => {
+                const student = studentsInClass.find(s => s.studentId === selectedStudentId);
+                if (student) {
+                    setSearchResult({ student, hasSearched: true });
+                }
+            }, [studentsInClass, selectedStudentId]);
+
+            const currentActivities = searchResult.student?.activities[selectedDay] || [];
+
+            return (
+                <div className="container mx-auto max-w-4xl">
+                    <Header />
+                    
+                    <SearchForm 
+                        classes={classes}
+                        selectedClass={selectedClass}
+                        onClassChange={handleClassChange}
+                        studentsInClass={studentsInClass}
+                        selectedStudentId={selectedStudentId}
+                        onStudentChange={handleStudentChange}
+                        selectedDay={selectedDay}
+                        onDayChange={handleDayChange}
+                        onSearch={handleSearch}
+                    />
+
+                    <TodayInfo />
+
+                    {searchResult.hasSearched && searchResult.student && (
+                        <div id="resultsContainer" className="animate-fade-in">
+                            <StudentInfo 
+                                student={searchResult.student} 
+                                searchDay={selectedDay} 
+                            />
+
+                            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 border border-gray-100 dark:border-gray-700 animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 border-b pb-2 dark:border-gray-700">
+                                    課後活動安排
+                                </h2>
+                                
+                                <div className="space-y-4">
+                                    {currentActivities.length > 0 ? (
+                                        currentActivities.map((activity, index) => (
+                                            <ActivityCard key={`${activity.name}-${index}`} activity={activity} />
+                                        ))
+                                    ) : (
+                                        <div className="bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-500 dark:border-yellow-400 p-4 rounded animate-fade-in">
+                                            <p className="text-yellow-700 dark:text-yellow-200 font-semibold">
+                                                該學生在選定的日期沒有課後活動安排。
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
 </html>
