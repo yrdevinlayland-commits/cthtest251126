@@ -1,0 +1,5 @@
+{
+  "name": "After-school Activity Query System",
+  "description": "A system for querying student after-school activities based on class, student ID, and day of the week.",
+  "requestFramePermissions": []
+}
